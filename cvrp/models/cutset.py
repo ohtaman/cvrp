@@ -64,6 +64,8 @@ def solve(instance,  timelimit, log_dir):
         feasible = True
         for tour in tours:
             tour = list(tour)
+            if len(tour) <= 1:
+                continue
             demand = demands[tour].sum()
             n_edges = pulp.lpSum(x[tour, :][:, tour])
             v = math.ceil(demand/capacity)

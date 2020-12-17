@@ -47,11 +47,15 @@ def dists(coord1, coord2):
     ])
 
 def get_solver(msg=True, timelimit=None, warm_start=True, **kwargs):
-    if pulp.GUROBI_CMD().available():
-        return pulp.GUROBI_CMD(msg=msg, warmStart=warm_start, timeLimit=timelimit, **kwargs)
+    if pulp.GUROBI().available():
+        solver = pulp.GUROBI(msg=msg, warmStart=warm_start, timeLimit=timelimit, options=[('Heuristics', 1.0), ('MIPFocus', 1)], **kwargs)
+    elif pulp.GUROBI_CMD().available():
+        solver = pulp.GUROBI_CMD(msg=msg, warmStart=warm_start, timeLimit=timelimit, options=[('Heuristics', 1.0), ('MIPFocus', 1)], **kwargs)
     elif pulp.MIPCL_CMD().available():
-        return pulp.MIPCL_CMD(msg=msg, timeLimit=timelimit, **kwargs)
+        solver = pulp.MIPCL_CMD(msg=msg, timeLimit=timelimit, **kwargs)
     elif pulp.COIN_CMD().available():
-        return pulp.COIN_CMD(msg=msg, warmStart=warm_start, threads=multiprocessing.cpu_count(), timeLimit=timelimit, **kwargs)
+        solver = pulp.COIN_CMD(msg=msg, warmStart=warm_start, threads=multiprocessing.cpu_count(), timeLimit=timelimit, **kwargs)
     else:
-        return pulp.PULP_CBC_CMD(msg=True, warmStart=warm_start, threads=multiprocessing.cpu_count(), timeLimit=timelimit, **kwargs)
+        solver = pulp.PULP_CBC_CMD(msg=True, warmStart=warm_start, threads=multiprocessing.cpu_count(), timeLimit=timelimit, **kwargs)
+    print(f'Solver selected: {solver}')
+    return solver

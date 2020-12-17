@@ -61,8 +61,7 @@ def solve(instance, timelimit, log_dir):
     assert len(instance.depots) == 1
     assert instance.depots[0] == nodes[0]
     model, (x, q) = build_model(n_nodes=len(nodes), demands=demands, capacity=capacity, dists=dists, n_vehicles=n_vehicles)
-    print(pulp.lpDot(demands, x))
-    model.writeLP(f'{log_dir}/model.lp')
+    model.writeLP(log_dir.joinpath(f'model.lp'))
     mlflow.log_params(dict(
         n_constraints=len(model.constraints),
         n_variables=len(model.variables()))
@@ -71,8 +70,6 @@ def solve(instance, timelimit, log_dir):
     solver = utils.get_solver()
     solver.timeLimit = timelimit
     model.solver = solver
-    model.solve()
-    np.savetxt(f'{log_dir}/q.csv', utils.get_values(q))
-    np.savetxt(f'{log_dir}/x.csv', utils.get_values(x))
+    assert model.solve() == pulp.LpStatus.Optimal
 
     return decode_result(utils.get_values(x), dict(enumerate(nodes)))
