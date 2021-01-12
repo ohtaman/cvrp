@@ -1,94 +1,77 @@
 import math
-import time
 
 import pulp
 import numpy as np
 import networkx as nx
+import matplotlib.pyplot as plt
+import mlflow
 
 from cvrp import utils
 
 
-def build_model(instance, n_vehicles=None):
-    nodes = list(instance.get_nodes())
-    n_nodes = len(nodes)
-    coord = instance.node_coords
-    dist = np.array([
-        [
-            np.linalg.norm([coord[a][0] - coord[b][0], coord[a][1] - coord[b][1]])
-            for b in nodes
-        ]
-        for a in nodes
-    ])
-
+def build_model(n_nodes, demands, capacity, dists, n_vehicles):
     model = pulp.LpProblem()
+    nodes = list(range(n_nodes))
 
-    x = np.array(pulp.LpVariable.matrix('x', (nodes, nodes), 0, 1, cat=pulp.LpBinary))
-
+    x = np.array(pulp.LpVariable.matrix('x', (nodes, nodes), cat=pulp.LpBinary))
+    f = np.array(pulp.LpVariable.matrix('f', (nodes, nodes), 0, capacity, cat=pulp.LpContinuous))
     utils.fix_value(np.diagonal(x), 0)
+    utils.fix_value(np.diagonal(f), 0)
 
-    objective = pulp.lpSum(dist*x)
-    model.setObjective(objective)
+    model.setObjective(pulp.lpSum(dists*x))
 
-    for i in range(n_nodes):
-        if nodes[i] in instance.depots:
-            if not n_vehicles:
-                model.addConstraint(pulp.lpSum(x[i, :]) == pulp.lpSum(x[:, i]))
-            else:
-                model.addConstraint(pulp.lpSum(x[i, :]) == n_vehicles)
-                model.addConstraint(pulp.lpSum(x[:, i]) == n_vehicles)
-        else:
-            model.addConstraint(pulp.lpSum(x[i, :]) == 1)
-            model.addConstraint(pulp.lpSum(x[:, i]) == 1)
+    for i in nodes[1:]:
+        model.addConstraint(pulp.lpSum(x[i, :]) == 1)
+        model.addConstraint(pulp.lpSum(x[:, i]) == 1)
 
-    return model, x
+    model.addConstraint(pulp.lpSum(x[0, :]) == n_vehicles)
+    model.addConstraint(pulp.lpSum(x[:, 0]) == n_vehicles)
+
+    for i in nodes[1:]:
+        model.addConstraint(pulp.lpSum(f[:, i]) - pulp.lpSum(f[i, :]) == demands[i])
+
+    for i in nodes:
+        for j in nodes:
+            if i == j:
+                continue
+            model.addConstraint(f[i, j] <= (capacity - demands[i])*x[i, j])
+            # model.addConstraint(f[i, j] >= demands[j]*x[i, j])
+
+    model._x = x
+    model._f = f
+    return model
 
 
-def decode_result(x):
-    graph = nx.from_numpy_array(utils.get_values(x), create_using=nx.DiGraph)
+def decode_result(x, labels):
+    try:
+        graph = nx.from_numpy_array(x, create_using=nx.DiGraph)
+    except TypeError:
+        return []
+    graph = nx.relabel_nodes(graph, labels)
     return list(nx.simple_cycles(graph))
 
-def draw_result(x, pos):
-    graph = nx.from_numpy_array(utils.get_values(x))
-    nx.draw(graph, pos, node_size=1)
 
-def get_cuts()
-
-
-def solve(instance, n_vehicles, timelimit):
-    model, x = build_model(instance, n_vehicles=n_vehicles)
+def solve(instance, timelimit, log_dir, n_vehicles=None):
     nodes = list(instance.get_nodes())
-    node_to_idx = {n:i for i, n in enumerate(instance.get_nodes())}
+    demands = np.array([instance.demands[node] for node in nodes])
+    coords = np.array([instance.node_coords[node] for node in nodes])
+    dists = utils.dists(coords, coords)
+    capacity = instance.capacity
+    if n_vehicles is None:
+        n_vehicles = math.ceil(sum(demands)/capacity)
+
+    assert len(instance.depots) == 1
+    assert instance.depots[0] == nodes[0]
+    model = build_model(n_nodes=len(nodes), demands=demands, capacity=capacity, dists=dists, n_vehicles=n_vehicles)
+    model.writeLP(log_dir.joinpath(f'model.lp'))
+    mlflow.log_params(dict(
+        n_constraints=len(model.constraints),
+        n_variables=len(model.variables()))
+    )
+
     solver = utils.get_solver()
+    solver.timeLimit = timelimit
+    model.solver = solver
+    assert model.solve() == pulp.LpSolutionOptimal
 
-    start = time.time()
-    limit = start + timelimit
-    model.solve(solver)
-
-    while True:
-        graph = nx.from_numpy_array(utils.get_values(x))
-        for depot in instance.depots:
-            graph.remove_node(node_to_idx[depot])
-        tours = list(nx.connected_components(graph))
-        feasible = True
-        for tour in tours:
-            tour = list(tour)
-            tour_size = len(tour)
-            demands = sum(instance.demands[nodes[i]] for i in tour)
-            n_edges = pulp.lpSum(x[tour, :][:, tour])
-            v = math.ceil(demands/instance.capacity)
-            if utils.get_values(n_edges) > tour_size - v:
-                feasible = False
-                model.addConstraint(n_edges <= tour_size - v)
-        if feasible:
-            break
-
-        solver.timeLimit = int(limit - time.time())
-        if solver.timeLimit < 1:
-            print('time limit exceeded.')
-            break
-        if pulp.LpStatus[model.solve(solver)] != 'Optimal':
-            print(model)
-        assert pulp.LpStatus[model.solve(solver)] == 'Optimal'
-
-    draw_result(x, [instance.node_coords[a] for a in instance.get_nodes()])
-    return decode_result(x)
+    return decode_result(utils.get_values(model._x), dict(enumerate(nodes)))

@@ -60,19 +60,18 @@ def callback(model, where):
             model.cbLazy(n_edges <= len(tour) - n_vehicles)
     
 
-def solve(instance,  timelimit, log_dir):
+def solve(instance,  timelimit, log_dir, n_vehicles=None):
     nodes = list(instance.get_nodes())
     n_nodes = len(nodes)
     demands = np.array([instance.demands[node] for node in nodes])
     coords = np.array([instance.node_coords[node] for node in nodes])
     dists = utils.dists(coords, coords)
     capacity = instance.capacity
-    n_vehicles = math.ceil(sum(demands)/capacity)
+    if n_vehicles is None:
+        n_vehicles = math.ceil(sum(demands)/capacity)
 
     model = build_model(n_nodes, dists, demands, capacity, n_vehicles)
     model.setParam('TimeLimit', timelimit)
-    # model.setParam('Heuristics', 1.0)
-    # model.setParam('MIPFocus', 1)
     model.setParam('LazyConstraints', 1)
     model.optimize(callback=callback)
     assert model.Status in (gp.GRB.Status.OPTIMAL, gp.GRB.Status.TIME_LIMIT)

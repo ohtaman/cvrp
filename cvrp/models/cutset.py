@@ -24,7 +24,34 @@ def build_model(n_nodes, dists, n_vehicles):
     model.addConstraint(pulp.lpSum(x[0, :]) == n_vehicles)
     model.addConstraint(pulp.lpSum(x[:, 0]) == n_vehicles)
 
-    return model, x
+    model._x = x
+    return model
+
+
+def add_cuts(model, demands, capacity):
+    # NetworkX のグラフに変換
+    graph = nx.from_numpy_array(
+        np.vectorize(lambda x: x.value())(model._x)
+    )
+    # 各トラックのルートと部分巡回路を取得
+    graph.remove_node(0)
+    tours = list(nx.connected_components(graph))
+
+    n_cuts = 0
+    for tour in tours:
+        tour = list(tour)
+        if len(tour) <= 1:
+            continue
+
+        # エッジ数と、必要なトラックの台数を計算
+        n_edges = pulp.lpSum(model._x[tour, :][:, tour])
+        v = math.ceil(demands[tour].sum()/capacity)
+
+        constraint = n_edges <= len(tour) - v
+        if not constraint.valid():
+            model.addConstraint(constraint)
+            n_cuts += 1
+    return n_cuts
 
 
 def decode_result(x, labels):
@@ -38,48 +65,40 @@ def decode_result(x, labels):
     return list(nx.simple_cycles(graph))
 
 
-def draw_result(x, pos):
-    graph = nx.from_numpy_array(utils.get_values(x))
-    nx.draw(graph, pos, node_size=1)
-
-def solve(instance,  timelimit, log_dir):
+def solve(instance,  timelimit, log_dir, n_vehicles=None):
     nodes = list(instance.get_nodes())
     n_nodes = len(nodes)
     demands = np.array([instance.demands[node] for node in nodes])
     coords = np.array([instance.node_coords[node] for node in nodes])
     dists = utils.dists(coords, coords)
     capacity = instance.capacity
-    n_vehicles = math.ceil(sum(demands)/capacity)
+    if n_vehicles is None:
+        n_vehicles = math.ceil(sum(demands)/capacity)
 
     start = time.time()
-    limit = start + timelimit
-    model, x = build_model(n_nodes, dists, n_vehicles)
-    model.solver = utils.get_solver(warm_start=True)
-    assert model.solve() == 1
+    model = build_model(n_nodes, dists, n_vehicles)
+    # model.solver = utils.get_solver(warm_start=True, gapRel=1)
+    model.solver = utils.get_solver(warm_start=True)#, gapRel=0.2)
+    left = timelimit - (time.time() - start)
 
-    while time.time() < limit:
-        graph = nx.from_numpy_array(utils.get_values(x))
-        graph.remove_node(0)
-        tours = list(nx.connected_components(graph))
-        feasible = True
-        for tour in tours:
-            tour = list(tour)
-            if len(tour) <= 1:
-                continue
-            demand = demands[tour].sum()
-            n_edges = pulp.lpSum(x[tour, :][:, tour])
-            v = math.ceil(demand/capacity)
-            constraint = n_edges <= len(tour) - v
-            if not constraint.valid():
-                feasible = False
-                model.addConstraint(constraint)
-        if feasible:
-            break
+    flg = False
+    tours = []
+    while left > 0:
+        model.solver.timeLimit = left
+        #if  model.solve() != pulp.LpSolutionOptimal:
+        #    print(tours)
+        #    break
+        assert model.solve() == pulp.LpSolutionOptimal
+        if add_cuts(model, demands, capacity) == 0:
+        #n_cuts, t = add_cuts(model, demands, capacity)
+        #tours.append(t)
+        #if n_cuts == 0:
+            if flg:
+                break
+            #model.solver = utils.get_solver(warm_start=True, gapRel=1)
+            flg = True
+        left = timelimit - (time.time() - start)
+    else:
+        print('Time limit reached.')
 
-        model.solver.timeLimit = int(limit - time.time())
-        if model.solver.timeLimit < 1:
-            print('time limit exceeded.')
-            break
-        assert pulp.LpStatus[model.solve()] == 'Optimal'
-
-    return decode_result(utils.get_values(x), nodes)
+    return decode_result(utils.get_values(model._x), nodes)

@@ -31,6 +31,20 @@ def parse_args(argv):
         default='cutset'
     )
     parser.add_argument(
+        '-n',
+        '--n_vehicles',
+        type=int,
+        help='# vehicles',
+        default=None
+    )
+    parser.add_argument(
+        '-c',
+        '--capacity',
+        type=float,
+        help='capacity',
+        default=None
+    )
+    parser.add_argument(
         '-t',
         '--time',
         help='time limit for MIP solver (sec)',
@@ -82,13 +96,18 @@ def main(argv=sys.argv):
         start = time.time()
         model = importlib.import_module('.'.join(('cvrp.models', args.model)))
         instance = tsplib95.load(args.instance)
-        result = model.solve(instance, timelimit=args.time, log_dir=log_dir)
+        if args.capacity is not None:
+            instance.capacity = args.capacity
+        if args.n_vehicles is not None:
+            instance.n_vehicles = args.n_vehicles
+        result = model.solve(instance, timelimit=args.time, log_dir=log_dir, n_vehicles=args.n_vehicles)
         print(result)
 
         cost = 0
         for tour in result:
             cost += sum(utils.dist(instance.node_coords[tour[i]], instance.node_coords[tour[i + 1]]) for i in range(-1, len(tour) - 1))
 
+        print(cost)
         mlflow.log_metrics(dict(
                 elapsed_time=time.time() - start,
                 cost=cost

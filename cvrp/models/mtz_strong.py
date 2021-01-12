@@ -38,7 +38,9 @@ def build_model(n_nodes, demands, capacity, dists, n_vehicles):
         model.addConstraint(q[i] <= capacity - pulp.lpDot(demands, x[i, :]))
         model.addConstraint(q[i] <= capacity - (capacity - max(demands[j] for j in range(len(demands)) if i != j) - demands[i])*x[0, i] - pulp.lpDot(demands, x[i, :]))
 
-    return model, (x, q)
+    model._x = x
+    model._q = q
+    return model
 
 
 def decode_result(x, labels):
@@ -50,17 +52,18 @@ def decode_result(x, labels):
     return list(nx.simple_cycles(graph))
 
 
-def solve(instance, timelimit, log_dir):
+def solve(instance, timelimit, log_dir, n_vehicles=None):
     nodes = list(instance.get_nodes())
     demands = np.array([instance.demands[node] for node in nodes])
     coords = np.array([instance.node_coords[node] for node in nodes])
     dists = utils.dists(coords, coords)
     capacity = instance.capacity
-    n_vehicles = math.ceil(sum(demands)/capacity)
+    if n_vehicles is None:
+        n_vehicles = math.ceil(sum(demands)/capacity)
 
     assert len(instance.depots) == 1
     assert instance.depots[0] == nodes[0]
-    model, (x, q) = build_model(n_nodes=len(nodes), demands=demands, capacity=capacity, dists=dists, n_vehicles=n_vehicles)
+    model = build_model(n_nodes=len(nodes), demands=demands, capacity=capacity, dists=dists, n_vehicles=n_vehicles)
     model.writeLP(log_dir.joinpath(f'model.lp'))
     mlflow.log_params(dict(
         n_constraints=len(model.constraints),
@@ -70,6 +73,6 @@ def solve(instance, timelimit, log_dir):
     solver = utils.get_solver()
     solver.timeLimit = timelimit
     model.solver = solver
-    assert model.solve() == pulp.LpStatus.Optimal
+    assert model.solve() == pulp.LpSolutionOptimal
 
-    return decode_result(utils.get_values(x), dict(enumerate(nodes)))
+    return decode_result(utils.get_values(model._x), dict(enumerate(nodes)))

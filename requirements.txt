@@ -1,0 +1,9 @@
+PuLP
+numpy
+scipy
+networkx
+matplotlib
+jupyter
+tsplib95
+mlflow
+psutil
